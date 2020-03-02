@@ -1,0 +1,164 @@
+---
+title: "KIM_JAEJIN_BAYESIAN_FinalProject"
+author: "Jaejin Kim"
+date: "5/15/2019"
+output: pdf_document
+---
+
+# 1. Introduction
+In this project, I try to estimate the birth weight of infants. Birth weight, can have significant affect on the infant's health. Especially low birth weight, which is defined as babies being born with less than 2,500 grams, may lead to a number of complications. These complicatoins include but not limited to infection, breathing and nervous system problems, cerebral palsy and developmental delay. It is often caused by premature birth, which is defined as being born before 37 weeks of pregnancy. Another cause is a condition called intrauterine growth restriction (IUGR), which is caused mainly by problems with the mother's health, or placenta.\
+\
+There have been studies in which the difference in chances of dlivering low birth weight infants between ethnicities has been studied. Also, the effect of the mothers' health on chances of low birth weight has thoroughly been studied. I aim to build on these existing researches to 1. estimate the distribution of birth weight in different ethinic groups, 2. study the effect of father's health on birth weight. The data I will be using contains 70607 cases of childbirth with various features such as birth weight, length of gestation, ethinicity, and BMI of parents.
+
+# 2. Data Preparation
+```{r}
+# Load packages
+suppressPackageStartupMessages(require(brms))
+suppressPackageStartupMessages(require(bridgesampling))
+```
+
+```{r, cache = T}
+# Load data
+dat <- read.csv("BirthWeight_Study.csv")
+```
+
+```{r, cache = T}
+# Change Race and BMI into factors
+dat$Race <- as.factor(dat$Race)
+dat$BMI <- as.factor(dat$BMI)
+
+# Recode Infant Sex
+dat$InfantSex[dat$InfantSex == 1] <- 0
+dat$InfantSex[dat$InfantSex == 2] <- 1
+
+# Change Birth Weight scale from gram to kilogram
+dat$BirthWeight <- dat$BirthWeight / 1000
+```
+
+# 3. Prior Predictive Distribution
+
+I decided to have the mean of the intercept as the average birth weight, which is 3.5kg. Predictors that can have potential negative effects on birth weight such as the mother being older than 35, low BMI of mother, the baby being a female, and the delivery being second birth have been given negative means of prior distribution. For race, black or African American group (Race = 2) has been given a lower mean of prior distribution and Asian and pacific islander group (Race = 3) a higher mean compared to black or African American but lower than white American group, following previous studies.
+
+```{r}
+my_prior1 <-  c(prior(normal(3.5, 0.5), class = "Intercept"),
+                prior(normal(-0.1, 0.1), class = "b", coef = "Age35"),
+                prior(normal(-0.5, 0.1), class = "b", coef = "BMI2"),
+                prior(normal(0.1, 0.1), class = "b", coef = "BMI3"),
+                prior(normal(0.25, 0.1), class = "b", coef = "BMI4"),
+                prior(normal(0.25, 0.1), class = "b", coef = "GestWeek"),
+                prior(normal(-0.05, 0.1), class = "b", coef = "InfantSex"),
+                prior(normal(-0.25, 0.1), class = "b", coef = "Race2"),
+                prior(normal(-0.05, 0.1), class = "b", coef = "Race3"),
+                prior(normal(-0.25, 0.1), class = "b", coef = "SecondBirth"))
+
+model1 <- brm(formula = BirthWeight | trunc(lb = 0) ~ 
+                Race + GestWeek + InfantSex + SecondBirth + Age35 + BMI,
+                prior = my_prior1, data = dat, family = gaussian,
+                sample_prior = "only", silent = T, refresh = 0)
+
+prior1 <- posterior_predict(model1)
+```
+
+```{r, cache = T}
+plot(density(prior1[,1]), xlab = "Birth Weight", ylab = "Density")
+abline(v = 3.5, col = 2, lty = 2)
+axis(1, at = 3.5, labels = F)
+legend("topright", legend = "Average Birth Weight (3.5kg)",
+       col = 2, lty = 2)
+for(i in 2:ncol(prior1)) {lines(density(prior1[,i], na.rm =T))}
+```
+
+We can see that the draws from prior distributions are centered around the average birth weight and distributed along the reasonable range. But there is considerable variance between each chains, which is also appropriate since they are not yet conditioned on the data.
+
+```{r, chace = T}
+plot(density(prior1[,1]), xlim =c(0,7), ylim = c(0,0.2),
+     xlab = "Birth Weight", ylab = "Density")
+for(i in 2:ncol(prior1)) {lines(density(prior1[,i], na.rm =T))}
+```
+
+A closer look at the range that can be expected in real life. The density looks appropriate.
+
+
+# 4. Posterior Predictive Distribution (Differences between ethinic groups)
+```{r, cache = T}
+model1.1 <- brm(formula = BirthWeight ~ 
+                Age35 + BMI + GestWeek + InfantSex + Race + SecondBirth,
+                prior = my_prior1, data = dat, family = gaussian,
+                save_all_pars = TRUE, silent = T, refresh = 0)
+pp_check(model1.1, type = "dens_overlay")
+```
+
+We can see from the above plot that the posterior predictive distribution is very similar to the data itself.
+
+
+```{r, cache = T}
+marginal_effects(model1.1, effects = "Race")
+```
+
+We can see that Race1, which is Caucasian, has the highest average birthweight and the black or African American has the lowest average birthweight as expected from the results of previous studies.
+
+# 5. Model Comparison by ELPD (Effects of paternal characteristics)
+
+We now add paternal characteristics, FatherAge35, a binary variable indicating whether the father is older than 35 years old or not, and FatherBMI to see if paternal characteristics have significant effects on birth weight.
+
+```{r}
+my_prior2 <-  c(prior(normal(3.5, 0.5), class = "Intercept"),
+                prior(normal(-0.1, 0.1), class = "b", coef = "Age35"),
+                prior(normal(-0.5, 0.1), class = "b", coef = "BMI2"),
+                prior(normal(0.1, 0.1), class = "b", coef = "BMI3"),
+                prior(normal(0.25, 0.1), class = "b", coef = "BMI4"),
+                prior(normal(0.25, 0.1), class = "b", coef = "GestWeek"),
+                prior(normal(-0.05, 0.1), class = "b", coef = "InfantSex"),
+                prior(normal(-0.25, 0.1), class = "b", coef = "Race2"),
+                prior(normal(-0.05, 0.1), class = "b", coef = "Race3"),
+                prior(normal(-0.25, 0.1), class = "b", coef = "SecondBirth"),
+                prior(normal(-0.1, 0.1), class = "b", coef = "FatherAge35"),
+                prior(normal(0.1, 0.1), class = "b", coef = "FatherBMI"))
+
+model2 <- brm(formula = BirthWeight ~ 
+              Age35 + BMI + GestWeek + InfantSex + Race + SecondBirth +
+              FatherAge35 + FatherBMI, prior = my_prior2, data = dat,
+              family = gaussian, save_all_pars = TRUE, silent = T, refresh = 0)
+
+pp_check(model2, type = "dens_overlay")
+```
+
+```{r, cache = T}
+marginal_effects(model2, effects = "FatherAge35")
+```
+
+```{r, cache = T}
+marginal_effects(model2, effects = "FatherBMI")
+```
+
+From the above marginal effects plot, we can see that patternal characteristics have only small influences on the birth weight. It seems that we may not have to include these variables, but we will further investigate it below using model comparison methods between the model with paternal characteristics and the one without them.
+
+# 6. Model Comparison by ELPD
+```{r, cache = T}
+loo1.1 <- loo(model1.1)
+loo2 <- loo(model2)
+
+loo::loo_compare(loo1.1, loo2)
+```
+
+The results favor the first model without paternal characteristics as expected from the above marginal effects plot. However, the difference between the two model is not so large when considering the estimated standard error of the difference.
+
+# 7. Model Comparison by Posterior Probability
+```{r, cache = T}
+loo_model_weights(list(loo1.1, loo2))
+```
+
+loo_model_weights puts all of the weight on the first model. Adding the paternal characteristics did not add any significant explanatory power to the model. Now we look at the posterior probability.
+
+```{r, cache = T}
+bs_post1.1 <- bridge_sampler(model1.1)
+bs_post2 <- bridge_sampler(model2)
+error_measures(bs_post1.1)
+error_measures(bs_post2)
+post_prob(bs_post1.1, bs_post2)
+```
+
+Again, all of the posterior probability is put on the first model. From the results, we can conclude that the first model, the model without paternal characteristics is superior than the second model, the model with paternal variables.
+
+## Reference
+Children's Hospital of Philadelphia, *Low Birthweight*, Retrieved from https://www.chop.edu/conditions-diseases/low-birthweight
